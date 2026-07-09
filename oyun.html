@@ -163,11 +163,11 @@
             'use strict';
 
             // ------------------------------
-            // Temel sahne kurulumu
+            // Temel sahne kurulumu — GECE / YAĞMUR / ŞİMŞEK
             // ------------------------------
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb);
-            scene.fog = new THREE.Fog(0x87ceeb, 60, 220);
+            scene.background = new THREE.Color(0x050510);
+            scene.fog = new THREE.FogExp2(0x050510, 0.012);
 
             const camera = new THREE.PerspectiveCamera(
                 60, window.innerWidth / window.innerHeight, 0.1, 1000
@@ -177,40 +177,154 @@
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.4;
             document.body.appendChild(renderer.domElement);
 
-            // Işıklar
-            const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+            // ---- Gece ışıklandırma (arabayı rahat görecek kadar) ----
+            const hemi = new THREE.HemisphereLight(0x2a2a50, 0x0a0a15, 0.9);
             scene.add(hemi);
 
-            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-            sun.position.set(50, 80, 30);
-            sun.castShadow = true;
-            sun.shadow.mapSize.set(2048, 2048);
-            sun.shadow.camera.left = -100;
-            sun.shadow.camera.right = 100;
-            sun.shadow.camera.top = 100;
-            sun.shadow.camera.bottom = -100;
-            scene.add(sun);
+            // Ay ışığı — sahneyi sürekli aydınlatan güçlü sabit ışık
+            const moonLight = new THREE.DirectionalLight(0x7799bb, 0.8);
+            moonLight.position.set(30, 60, -20);
+            moonLight.castShadow = true;
+            moonLight.shadow.mapSize.set(2048, 2048);
+            moonLight.shadow.camera.left = -80;
+            moonLight.shadow.camera.right = 80;
+            moonLight.shadow.camera.top = 80;
+            moonLight.shadow.camera.bottom = -80;
+            scene.add(moonLight);
 
-            // Zemin
+            // ---- Şimşek ışığı (DirectionalLight — flash sırasında parlar) ----
+            const lightningLight = new THREE.DirectionalLight(0xccccff, 0);
+            lightningLight.position.set(-20, 100, 40);
+            scene.add(lightningLight);
+
+            // ---- Far ışıkları (sahneye eklenir, her frame araba takip eder) ----
+            function createHeadlight(offsetX) {
+                const light = new THREE.SpotLight(0xfff5dd, 6, 100, Math.PI / 5.5, 0.5, 1.4);
+                light.castShadow = true;
+                light.shadow.mapSize.set(1024, 1024);
+                const target = new THREE.Object3D();
+                scene.add(light);
+                scene.add(target);
+                light.target = target;
+                return { light, target, offsetX };
+            }
+            const headL = createHeadlight(-0.65);
+            const headR = createHeadlight(0.65);
+
+            // Araba üzerinde sabit PointLight (arabayı yukarıdan hafif aydınlatır)
+            const carTopLight = new THREE.PointLight(0x8899cc, 0.7, 25, 2);
+            carTopLight.position.set(0, 6, 0);
+            scene.add(carTopLight);
+
+            function updateHeadlights() {
+                const heading = carState.heading;
+                const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
+                const right = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+
+                [headL, headR].forEach((h) => {
+                    // Far pozisyonu: arabanın önünde, hafif yanlarda
+                    const pos = car.position.clone()
+                        .add(right.clone().multiplyScalar(h.offsetX))
+                        .add(new THREE.Vector3(0, 0.7, 0))
+                        .add(forward.clone().multiplyScalar(2.2));
+                    h.light.position.copy(pos);
+
+                    // Hedef: ileri yönde uzak nokta
+                    const tgt = pos.clone().add(forward.clone().multiplyScalar(40));
+                    tgt.y = 0;
+                    h.target.position.copy(tgt);
+                });
+
+                // Araba üstü ışık pozisyonu
+                carTopLight.position.copy(car.position).add(new THREE.Vector3(0, 5, 0));
+            }
+
+            // ---- Gökyüzü kubbesi (yıldızlar) ----
+            (function createStarfield() {
+                const starCount = 1200;
+                const geo = new THREE.BufferGeometry();
+                const verts = new Float32Array(starCount * 3);
+                for (let i = 0; i < starCount; i++) {
+                    // yarı-küre üst kısım
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.random() * Math.PI * 0.45; // ufka yakın = 0, tepe = 0.5π
+                    const r = 300 + Math.random() * 100;
+                    verts[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+                    verts[i * 3 + 1] = r * Math.cos(phi);
+                    verts[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+                }
+                geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+                const mat = new THREE.PointsMaterial({
+                    color: 0xaaaacc,
+                    size: 0.7,
+                    transparent: true,
+                    opacity: 0.5,
+                    fog: false
+                });
+                scene.add(new THREE.Points(geo, mat));
+            })();
+
+            // ---- Bulut katmanı (yarı saydam düzlem) ----
+            (function createClouds() {
+                // Canvas ile bulut dokusu oluştur
+                const cv = document.createElement('canvas');
+                cv.width = 512; cv.height = 512;
+                const cx = cv.getContext('2d');
+                cx.fillStyle = 'rgba(0,0,0,0)';
+                cx.fillRect(0, 0, 512, 512);
+                for (let i = 0; i < 90; i++) {
+                    const x = Math.random() * 512;
+                    const y = Math.random() * 512;
+                    const r = 30 + Math.random() * 80;
+                    const grad = cx.createRadialGradient(x, y, 0, x, y, r);
+                    grad.addColorStop(0, 'rgba(20,20,35,0.5)');
+                    grad.addColorStop(1, 'rgba(10,10,20,0)');
+                    cx.fillStyle = grad;
+                    cx.fillRect(x - r, y - r, r * 2, r * 2);
+                }
+                const tex = new THREE.CanvasTexture(cv);
+                tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                tex.repeat.set(3, 3);
+                const cloudGeo = new THREE.PlaneGeometry(600, 600);
+                const cloudMat = new THREE.MeshBasicMaterial({
+                    map: tex, transparent: true, opacity: 0.7,
+                    depthWrite: false, side: THREE.DoubleSide, fog: false
+                });
+                const clouds = new THREE.Mesh(cloudGeo, cloudMat);
+                clouds.rotation.x = -Math.PI / 2;
+                clouds.position.y = 80;
+                scene.add(clouds);
+            })();
+
+            // ---- Zemin (koyu ıslak çimen) ----
             const groundGeo = new THREE.PlaneGeometry(500, 500);
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a7d3a });
+            const groundMat = new THREE.MeshStandardMaterial({
+                color: 0x0c1a0c, roughness: 0.6, metalness: 0.15
+            });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // Basit yol (görsel referans için ızgara/şerit)
-            const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            // ---- Islak yol (koyu asfalt + yansıma hissi) ----
+            const roadMat = new THREE.MeshStandardMaterial({
+                color: 0x111118, roughness: 0.25, metalness: 0.35
+            });
             const road = new THREE.Mesh(new THREE.PlaneGeometry(20, 500), roadMat);
             road.rotation.x = -Math.PI / 2;
             road.position.y = 0.01;
             road.receiveShadow = true;
             scene.add(road);
 
-            // Yol kenar çizgileri (basit görsel referans, tekrar eden bloklar)
-            const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            // Yol kenar çizgileri
+            const stripeMat = new THREE.MeshStandardMaterial({
+                color: 0x888888, roughness: 0.4, metalness: 0.1
+            });
             const stripeGroup = new THREE.Group();
             for (let i = -240; i < 240; i += 10) {
                 const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 4), stripeMat);
@@ -219,8 +333,10 @@
             }
             scene.add(stripeGroup);
 
-            // Rastgele engel/çevre nesneleri (yolun iki yanına basit kutular)
-            const obstacleMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+            // Yol kenarı engeller (daha koyu tonlar — gece)
+            const obstacleMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1008, roughness: 0.85, metalness: 0.0
+            });
             for (let i = -240; i < 240; i += 20) {
                 [-14, 14].forEach((xSide) => {
                     const box = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), obstacleMat);
@@ -230,6 +346,131 @@
                     scene.add(box);
                 });
             }
+
+            // ============================
+            // YAĞMUR SİSTEMİ
+            // ============================
+            const RAIN_COUNT = 6000;
+            const rainGeo = new THREE.BufferGeometry();
+            const rainPositions = new Float32Array(RAIN_COUNT * 3);
+            const rainVelocities = new Float32Array(RAIN_COUNT); // her damlanın düşüş hızı
+
+            function initRainDrop(i) {
+                rainPositions[i * 3]     = (Math.random() - 0.5) * 200;  // x
+                rainPositions[i * 3 + 1] = Math.random() * 60 + 5;      // y (yukarıda)
+                rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 200; // z
+                rainVelocities[i] = 30 + Math.random() * 30;            // düşüş hızı
+            }
+            for (let i = 0; i < RAIN_COUNT; i++) initRainDrop(i);
+
+            rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+
+            // Yağmur çizgi materyali (ince beyaz çizgiler)
+            const rainMat = new THREE.PointsMaterial({
+                color: 0x8899bb,
+                size: 0.08,
+                transparent: true,
+                opacity: 0.5,
+                depthWrite: false,
+                fog: true
+            });
+            const rain = new THREE.Points(rainGeo, rainMat);
+            scene.add(rain);
+
+            function updateRain(dt) {
+                const pos = rainGeo.attributes.position.array;
+                for (let i = 0; i < RAIN_COUNT; i++) {
+                    pos[i * 3 + 1] -= rainVelocities[i] * dt;
+                    // hafif rüzgar etkisi
+                    pos[i * 3]     += 2.0 * dt;
+                    pos[i * 3 + 2] += 1.5 * dt;
+                    // yere düştüyse yeniden spawn
+                    if (pos[i * 3 + 1] < 0) {
+                        // arabanın etrafında yeniden oluştur
+                        pos[i * 3]     = car.position.x + (Math.random() - 0.5) * 200;
+                        pos[i * 3 + 1] = 40 + Math.random() * 25;
+                        pos[i * 3 + 2] = car.position.z + (Math.random() - 0.5) * 200;
+                    }
+                }
+                rainGeo.attributes.position.needsUpdate = true;
+                // Yağmuru kameranın etrafında tut
+                rain.position.set(0, 0, 0);
+            }
+
+            // ============================
+            // ŞİMŞEK SİSTEMİ (2-6 saniyede bir)
+            // ============================
+            let lightningTimer = 2 + Math.random() * 4; // ilk şimşek zamanı
+            let lightningFlash = 0; // mevcut flash yoğunluğu (0-1)
+            let lightningPhase = 0; // 0 = bekleme, 1 = flash aşamaları
+            let lightningFlashSteps = [];
+            let lightningStepIndex = 0;
+
+            // Overlay div — ekran beyaz flash efekti
+            const flashOverlay = document.createElement('div');
+            flashOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(200,200,255,0);pointer-events:none;z-index:5;transition:background 0.05s;';
+            document.body.appendChild(flashOverlay);
+
+            function triggerLightning() {
+                // Birden fazla flash adımı (doğal şimşek hissi)
+                const numFlashes = 2 + Math.floor(Math.random() * 3); // 2-4 flash
+                lightningFlashSteps = [];
+                for (let i = 0; i < numFlashes; i++) {
+                    lightningFlashSteps.push({
+                        intensity: 0.6 + Math.random() * 0.4, // 0.6 - 1.0
+                        duration: 0.04 + Math.random() * 0.06, // 40-100ms
+                        gap: 0.03 + Math.random() * 0.08 // arası bekleme
+                    });
+                }
+                lightningStepIndex = 0;
+                lightningPhase = 1;
+                // Pozisyonu rastgele değiştir
+                lightningLight.position.set(
+                    (Math.random() - 0.5) * 100,
+                    80 + Math.random() * 40,
+                    (Math.random() - 0.5) * 100
+                );
+            }
+
+            function updateLightning(dt) {
+                if (lightningPhase === 0) {
+                    // bekleme
+                    lightningTimer -= dt;
+                    if (lightningTimer <= 0) {
+                        triggerLightning();
+                        lightningTimer = 2 + Math.random() * 4; // sonraki: 2-6 sn
+                    }
+                    lightningLight.intensity = 0;
+                    lightningFlash = 0;
+                } else {
+                    // flash aşaması
+                    if (lightningStepIndex >= lightningFlashSteps.length) {
+                        lightningPhase = 0;
+                        lightningLight.intensity = 0;
+                        lightningFlash = 0;
+                    } else {
+                        const step = lightningFlashSteps[lightningStepIndex];
+                        step.duration -= dt;
+                        if (step.duration > 0) {
+                            // parlak
+                            lightningLight.intensity = step.intensity * 6;
+                            lightningFlash = step.intensity;
+                        } else {
+                            step.gap -= dt;
+                            lightningLight.intensity = 0;
+                            lightningFlash = 0;
+                            if (step.gap <= 0) {
+                                lightningStepIndex++;
+                            }
+                        }
+                    }
+                }
+                // Ekran flash overlay
+                const alpha = lightningFlash * 0.18;
+                flashOverlay.style.background = `rgba(200,200,255,${alpha})`;
+            }
+
+            // (Far ışıkları artık scene-level, updateHeadlights() ile güncelleniyor)
 
             // ------------------------------
             // Araba: FBX yükleme + placeholder fallback
@@ -306,26 +547,26 @@
                             mat.map = plateTex;
                             mat.color.set(0xffffff);
                         } else if (/Chrome/i.test(n) && !/Wheel/i.test(n)) {
-                            mat.color.set(0xdedede);
-                            mat.metalness = 1.0;
-                            mat.roughness = 0.15;
+                            mat.color.set(0x999999);
+                            mat.metalness = 0.5;
+                            mat.roughness = 0.35;
                         } else if (/WheelsChrome|Wheel.*Chrome|Centre|Ring/i.test(n)) {
                             mat.color.set(0x0a0a0a);
-                            mat.metalness = 0.7;
-                            mat.roughness = 0.35;
+                            mat.metalness = 0.35;
+                            mat.roughness = 0.5;
                         } else if (/CarbonFibre|Carbon/i.test(n)) {
                             mat.color.set(0x1a1a1a);
                             mat.metalness = 0.3;
                             mat.roughness = 0.4;
                         } else if (/BodyMaterials/i.test(n)) {
-                            // Araba rengi: siyah
+                            // Araba rengi: siyah (mat boya)
                             mat.color.set(0x0d0d0d);
-                            mat.metalness = 0.6;
-                            mat.roughness = 0.25;
+                            mat.metalness = 0.2;
+                            mat.roughness = 0.55;
                         } else if (/BlackGlossy/i.test(n)) {
                             mat.color.set(0x0a0a0a);
-                            mat.metalness = 0.5;
-                            mat.roughness = 0.2;
+                            mat.metalness = 0.25;
+                            mat.roughness = 0.45;
                         } else if (/Glass|Windscreen|Mirror/i.test(n)) {
                             mat.color.set(0x88aabb);
                             mat.transparent = true;
@@ -362,18 +603,28 @@
                         }
                     });
 
-                    // --- DEBUG: model boyutu ve mesh isimleri ---
+                    // Bounding box hesapla (alt panel için)
                     const box = new THREE.Box3().setFromObject(fbx);
                     const size = new THREE.Vector3();
                     box.getSize(size);
-                    console.log('Model boyutu (scale sonrası):', size);
-                    console.log('Model min/max:', box.min, box.max);
-                    const meshNames = [];
-                    fbx.traverse((c) => { if (c.isMesh) meshNames.push(c.name); });
-                    console.log('Tüm mesh isimleri:', meshNames);
-                    // ----------------------------------------------
+
                     // Modelin "ileri" yönü Three.js'in -Z ekseniyle uyuşmayabilir,
                     // gerekirse burada rotation.y = Math.PI ekleyerek çevir.
+
+                    // --- Alt panel: modelin altındaki boşluğu kapat ---
+                    const underGeo = new THREE.BoxGeometry(
+                        Math.max(size.x + 1, 4),
+                        0.1,
+                        Math.max(size.z + 1, 7)
+                    );
+                    const underMat = new THREE.MeshStandardMaterial({
+                        color: 0x000000, roughness: 1.0, metalness: 0.0
+                    });
+                    const underPanel = new THREE.Mesh(underGeo, underMat);
+                    underPanel.position.set(0, 0.05, 0);
+                    underPanel.receiveShadow = true;
+                    car.add(underPanel);
+
                     car.add(fbx);
                     loadingEl.classList.add('hidden');
                 },
@@ -565,6 +816,13 @@
 
                 updateCar(dt);
                 updateCamera(dt);
+
+                // Hava efektleri
+                updateRain(dt);
+                updateLightning(dt);
+
+                // Far ışıklarını güncelle (araba yönünü takip etsin)
+                updateHeadlights();
 
                 renderer.render(scene, camera);
             }
