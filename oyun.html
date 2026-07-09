@@ -264,19 +264,19 @@
             // bu yüzden car.fbx repo içine normal dosya olarak commit edilip
             // raw.githubusercontent.com üzerinden çekiliyor (bu domain CORS destekliyor).
             // Kendi repo/branch/path bilgine göre aşağıdaki URL'yi güncelle.
-            const CAR_FBX_URL = 'https://raw.githubusercontent.com/Softsprout/onur_tazefidan_portfolio/main/car.fbx';
+            const CAR_FBX_URL = 'https://raw.githubusercontent.com/Softsprout/veloralp-case/main/car.fbx';
             // Texture'lar repo'da ayrı bir klasörde (Textures/) duruyor.
             // FBX içindeki texture referansları genelde export edilen bilgisayarın
             // mutlak path'ini içerir, tarayıcı bunu bulamaz. Bu yüzden loader'a
             // "texture ararken buraya bak" diye ayrı bir kaynak yolu veriyoruz.
-            const TEXTURES_URL = 'https://raw.githubusercontent.com/Softsprout/onur_tazefidan_portfolio/main/Textures/';
+            const TEXTURES_URL = 'https://raw.githubusercontent.com/Softsprout/veloralp-case/main/Textures/';
             loader.setResourcePath(TEXTURES_URL);
 
             loader.load(
                 CAR_FBX_URL,
                 (fbx) => {
                     // FBX modelleri genelde çok büyük/küçük gelir, ölçeği projene göre ayarla.
-                    fbx.scale.setScalar(0.02); // <-- modelin gerçek boyutuna göre bu değeri değiştir
+                    fbx.scale.setScalar(0.03); // <-- modelin gerçek boyutuna göre bu değeri değiştir
                     // --- Texture eşleştirme + düz renk fallback ---
                     // FBX'te texture referansı yok, sadece 4 gerçek texture'ımız var.
                     // Materyal isimlerine göre elle eşleştiriyoruz; eşleşmeyenler için
