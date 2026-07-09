@@ -92,6 +92,11 @@
             touch-action: none;
         }
 
+        .btn svg {
+            display: block;
+            pointer-events: none;
+        }
+
         .btn:active,
         .btn.active {
             background: rgba(255, 255, 255, 0.4);
@@ -108,10 +113,12 @@
             .btn {
                 width: 54px;
                 height: 54px;
-                font-size: 20px;
             }
 
-
+            .btn svg {
+                width: 24px;
+                height: 24px;
+            }
         }
     </style>
 </head>
@@ -122,19 +129,39 @@
 
     <div id="hud">
         Hız: <span id="speedVal">0</span> km/h<br>
-        Kontroller: W/↑ gaz, S/↓ fren-geri, A/D veya ←/→ dön
+        Kontroller: W/↑/S/↓, Mobil: Ekran Butonları
     </div>
 
 
 
     <div id="controls">
         <div class="ctrl-group">
-            <div class="btn" id="btnLeft">◀</div>
-            <div class="btn" id="btnRight">▶</div>
+            <div class="btn" id="btnLeft">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+            </div>
+            <div class="btn" id="btnRight">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </div>
         </div>
         <div class="ctrl-group">
-            <div class="btn" id="btnBrake">▼</div>
-            <div class="btn" id="btnGas">▲</div>
+            <div class="btn" id="btnBrake">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <polyline points="19 12 12 19 5 12"></polyline>
+                </svg>
+            </div>
+            <div class="btn" id="btnGas">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+            </div>
         </div>
     </div>
 
@@ -156,14 +183,16 @@
             scene.background = skyColor;
             scene.fog = new THREE.FogExp2(skyColor, 0.006);
 
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
             const camera = new THREE.PerspectiveCamera(
                 75, window.innerWidth / window.innerHeight, 0.1, 1000
             );
 
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            const renderer = new THREE.WebGLRenderer({ antialias: !isMobile });
+            renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.enabled = !isMobile;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 0.7;
@@ -328,7 +357,7 @@
             // ============================
             // ============================
             const CHUNK_LEN = 60;
-            const NUM_CHUNKS = 14;
+            const NUM_CHUNKS = isMobile ? 8 : 14;
             const ROAD_W = 40; // 2-şeritli drift yolu (1 gidiş, 1 geliş)
             const SIDEWALK_W = 4;
 
@@ -382,8 +411,23 @@
             buildingTex.wrapS = THREE.RepeatWrapping;
             buildingTex.wrapT = THREE.RepeatWrapping;
             if (THREE.SRGBColorSpace) buildingTex.colorSpace = THREE.SRGBColorSpace;
-            const buildingMat = new THREE.MeshStandardMaterial({
-                color: 0x888888, map: buildingTex, roughness: 0.9, metalness: 0.2
+
+            const buildingMats = [];
+            const repOffsets = [
+                { s: 1, t: 1 },
+                { s: 2, t: 2 },
+                { s: 1.5, t: 3 },
+                { s: 3, t: 1.5 },
+                { s: 2, t: 4 },
+                { s: 4, t: 2 }
+            ];
+            repOffsets.forEach(rep => {
+                const tex = buildingTex.clone();
+                tex.repeat.set(rep.s, rep.t);
+                tex.needsUpdate = true;
+                buildingMats.push(new THREE.MeshStandardMaterial({
+                    color: 0x888888, map: tex, roughness: 0.9, metalness: 0.2
+                }));
             });
 
             // ---- Ağaç ve Çevre Materyalleri (NFS MW Sonbahar Ormanı) ----
@@ -479,7 +523,7 @@
                 const chunk = new THREE.Group();
                 chunk.userData.baseZ = zPos;
                 const startZ = zPos - CHUNK_LEN / 2;
-                const steps = 60; // Yüksek çözünürlüklü virajlar (low-poly duvar kesiklerini önlemek için)
+                const steps = isMobile ? 30 : 60; // Yüksek çözünürlüklü virajlar
                 const stepZ = CHUNK_LEN / steps;
 
                 const verts = [], uvs = [], indices = [];
@@ -574,7 +618,8 @@
                     // ---- Çevre Detayları (Ağaçlar, Dağlar ve Binalar) ----
                     // Objelerin iç içe girmesini kesin olarak engellemek için, her 60 metrede bir
                     // sol ve sağ taraf için SADECE BİR TANE obje seçip yerleştiriyoruz.
-                    if (Math.floor(z) % 60 === 0) {
+                    const spawnInterval = isMobile ? 120 : 60;
+                    if (Math.floor(z) % spawnInterval === 0) {
                         [-1, 1].forEach(side => {
                             const rand = Math.random();
                             
@@ -607,10 +652,8 @@
                                 
                                 const bGeo = new THREE.BoxGeometry(width, height, depth);
                                 
-                                const bMat = buildingMat.clone();
-                                bMat.map = buildingTex.clone();
-                                bMat.map.needsUpdate = true;
-                                bMat.map.repeat.set(width / 15, height / 15);
+                                // Material pool'dan rastgele seçiyoruz (böylece runtime'da klonlama yapıp GC kasılmalarına sebep olmuyoruz)
+                                const bMat = buildingMats[Math.floor(Math.random() * buildingMats.length)];
                                 
                                 const building = new THREE.Mesh(bGeo, bMat);
                                 building.position.set(bPos.x, height / 2 - 2, bPos.z - zPos);
@@ -781,6 +824,12 @@
             }
 
             const loadingEl = document.getElementById('loading');
+            let isModelLoaded = false;
+            function finishLoading() {
+                if (isModelLoaded) return;
+                isModelLoaded = true;
+                loadingEl.classList.add('hidden');
+            }
             const loader = new THREE.FBXLoader();
 
             // ÖNEMLİ: GitHub'ın Releases indirme bucket'ı CORS header'ı göndermiyor,
@@ -895,21 +944,21 @@
                     carState.length = size.z;
 
                     car.add(fbx);
-                    loadingEl.classList.add('hidden');
+                    finishLoading();
                 },
                 undefined,
                 (err) => {
                     console.warn('car.fbx yüklenemedi, placeholder araba kullanılıyor:', err);
                     addPlaceholderCar();
-                    loadingEl.classList.add('hidden');
+                    finishLoading();
                 }
             );
 
             // Yükleme 5 saniyede tamamlanmazsa da placeholder ile devam et (kilitlenmeyi önle)
             setTimeout(() => {
-                if (!loadingEl.classList.contains('hidden')) {
+                if (!isModelLoaded) {
                     if (car.children.length === 0) addPlaceholderCar();
-                    loadingEl.classList.add('hidden');
+                    finishLoading();
                 }
             }, 5000);
 
@@ -928,8 +977,6 @@
                 steerSpeed: 2.0,     // Direksiyonu daha hızlı çevir (anında tepki)
                 steerReturn: 10.0,   // Direksiyonu bırakınca daha hızlı topla
                 heading: Math.atan2(getRoadTangent(0).x, getRoadTangent(0).z),          // arabanın baktığı yön (radyan)
-                lateralVelocity: 0,   // hafif drift için yanal kayma
-                driftFactor: 0.35,   // Drift savrulmasını çok artırdım (0.10 -> 0.35)
             };
 
             const input = { forward: false, backward: false, left: false, right: false };
@@ -1001,6 +1048,14 @@
 
                 // Kamera her zaman arabanın hareketini yumuşak takip etsin
                 camPos.lerp(targetCamPos, Math.min(1, dt * 6));
+                
+                // Hızlandığında kameranın çok uzaklaşmasını engellemek için gecikme mesafesini sınırla
+                const maxCameraLag = 3.5;
+                const dist = camPos.distanceTo(targetCamPos);
+                if (dist > maxCameraLag) {
+                    const diff = new THREE.Vector3().subVectors(camPos, targetCamPos).setLength(maxCameraLag);
+                    camPos.copy(targetCamPos).add(diff);
+                }
 
                 // Bakış noktası
                 const rotatedLook = camLookOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
@@ -1052,23 +1107,15 @@
 
                 // Sadece hareket halindeyken dönüş uygula (duruyorken araba dönmesin)
                 const speedFactor = THREE.MathUtils.clamp(Math.abs(carState.speed) / carState.maxSpeed, 0, 1);
-                // Dönüş gücünü çok ciddi şekilde artırdık (2.2 -> 5.5) böylece yüksek hızda bile rahatça dönebilir
                 const turnAmount = carState.steerAngle * speedFactor * dt * 5.5;
 
                 // Geri giderken direksiyon yönü ters olur
                 const dir = carState.speed >= 0 ? 1 : -1;
                 carState.heading += turnAmount * dir;
 
-                // Hafif drift: yanal kaymayı direksiyon açısına ve hıza göre hesapla, sonra sönümle
-                const targetLateral = carState.steerAngle * speedFactor * carState.driftFactor * carState.speed;
-                carState.lateralVelocity = THREE.MathUtils.lerp(carState.lateralVelocity, targetLateral, dt * 3);
-
-                // İleri ve yan hareket vektörleri
+                // İleri hareket vektörü
                 const forwardVec = new THREE.Vector3(Math.sin(carState.heading), 0, Math.cos(carState.heading));
-                const rightVec = new THREE.Vector3(Math.cos(carState.heading), 0, -Math.sin(carState.heading));
-
                 car.position.addScaledVector(forwardVec, carState.speed * dt);
-                car.position.addScaledVector(rightVec, carState.lateralVelocity * dt);
 
                 // ----- PİST SINIRLARI (GERÇEKÇİ HİTBOX VE BİNORMAL ÇARPIŞMASI) -----
                 // Sadece X eksenine bakmak yerine, yolun kıvrımına göre dik açıyla (binormal) tam matematiksel mesafe ölçümü
@@ -1090,15 +1137,14 @@
                     const overlap = signedDistance - limit;
                     car.position.sub(binormal.clone().multiplyScalar(overlap));
                     carState.speed *= 0.99; // Duvara sürtününce hız kaybeder (daha yavaş)
-                    carState.lateralVelocity *= 0.8; // Drift savrulmasını hafif kır
                 } else if (signedDistance < -limit) {
                     // Sağa çarptı (arabayı merkeze doğru geri it)
                     const overlap = -limit - signedDistance;
                     car.position.add(binormal.clone().multiplyScalar(overlap));
                     carState.speed *= 0.99;
-                    carState.lateralVelocity *= 0.8;
                 }
 
+                // Görsel rotasyon
                 car.rotation.y = carState.heading;
 
                 // HUD güncelle
@@ -1121,8 +1167,14 @@
             // ------------------------------
             const clock = new THREE.Clock();
 
-            function animate() {
+             function animate() {
                 requestAnimationFrame(animate);
+                
+                if (!isModelLoaded) {
+                    renderer.render(scene, camera);
+                    return;
+                }
+
                 const dt = Math.min(clock.getDelta(), 0.05); // büyük sıçramaları engelle
 
                 updateCar(dt);
