@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Araba Sürüş Prototipi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #hud {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 15px;
+            line-height: 1.5;
+            pointer-events: none;
+            z-index: 10;
+            user-select: none;
+        }
+
+        #loading {
+            position: fixed;
+            inset: 0;
+            background: #111;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            z-index: 100;
+        }
+
+        #loading.hidden {
+            display: none;
+        }
+
+        /* Mobil kontroller */
+        #controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 16px;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        .ctrl-group {
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        .btn {
+            width: 64px;
+            height: 64px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            color: #fff;
+            font-size: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        .btn:active,
+        .btn.active {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        #restartBtn {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 20;
+            background: #2b7de9;
+            color: #fff;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        @media (max-width: 480px) {
+            #hud {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+
+            .btn {
+                width: 54px;
+                height: 54px;
+                font-size: 20px;
+            }
+
+            #restartBtn {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="loading">Model yükleniyor...</div>
+
+    <div id="hud">
+        Hız: <span id="speedVal">0</span> km/h<br>
+        Kontroller: W/↑ gaz, S/↓ fren-geri, A/D veya ←/→ dön
+    </div>
+
+    <button id="restartBtn">Yeniden Başlat</button>
+
+    <div id="controls">
+        <div class="ctrl-group">
+            <div class="btn" id="btnLeft">◀</div>
+            <div class="btn" id="btnRight">▶</div>
+        </div>
+        <div class="ctrl-group">
+            <div class="btn" id="btnBrake">▼</div>
+            <div class="btn" id="btnGas">▲</div>
+        </div>
+    </div>
+
+    <!-- Three.js + FBXLoader (CDN import, tek dosya bağımlılığı yok) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+
+    <script>
+        (function () {
+            'use strict';
+
+            // ------------------------------
+            // Temel sahne kurulumu
+            // ------------------------------
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.Fog(0x87ceeb, 60, 220);
+
+            const camera = new THREE.PerspectiveCamera(
+                60, window.innerWidth / window.innerHeight, 0.1, 1000
+            );
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Işıklar
+            const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+            scene.add(hemi);
+
+            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+            sun.position.set(50, 80, 30);
+            sun.castShadow = true;
+            sun.shadow.mapSize.set(2048, 2048);
+            sun.shadow.camera.left = -100;
+            sun.shadow.camera.right = 100;
+            sun.shadow.camera.top = 100;
+            sun.shadow.camera.bottom = -100;
+            scene.add(sun);
+
+            // Zemin
+            const groundGeo = new THREE.PlaneGeometry(500, 500);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a7d3a });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Basit yol (görsel referans için ızgara/şerit)
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const road = new THREE.Mesh(new THREE.PlaneGeometry(20, 500), roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0.01;
+            road.receiveShadow = true;
+            scene.add(road);
+
+            // Yol kenar çizgileri (basit görsel referans, tekrar eden bloklar)
+            const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const stripeGroup = new THREE.Group();
+            for (let i = -240; i < 240; i += 10) {
+                const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 4), stripeMat);
+                stripe.position.set(0, 0.02, i);
+                stripeGroup.add(stripe);
+            }
+            scene.add(stripeGroup);
+
+            // Rastgele engel/çevre nesneleri (yolun iki yanına basit kutular)
+            const obstacleMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+            for (let i = -240; i < 240; i += 20) {
+                [-14, 14].forEach((xSide) => {
+                    const box = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), obstacleMat);
+                    box.position.set(xSide + (Math.random() * 2 - 1), 1.5, i + (Math.random() * 4 - 2));
+                    box.castShadow = true;
+                    box.receiveShadow = true;
+                    scene.add(box);
+                });
+            }
+
+            // ------------------------------
+            // Araba: FBX yükleme + placeholder fallback
+            // ------------------------------
+            let car = new THREE.Group();
+            scene.add(car);
+            car.position.set(0, 0, 0);
+
+            function addPlaceholderCar() {
+                // FBX yüklenemezse veya hazır olmadan test edilirken kullanılacak basit kutu araba
+                const body = new THREE.Mesh(
+                    new THREE.BoxGeometry(2, 1, 4),
+                    new THREE.MeshStandardMaterial({ color: 0xd9432b })
+                );
+                body.position.y = 0.6;
+                body.castShadow = true;
+                car.add(body);
+
+                const cabin = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.4, 0.6, 1.8),
+                    new THREE.MeshStandardMaterial({ color: 0x222222 })
+                );
+                cabin.position.set(0, 1.2, -0.2);
+                cabin.castShadow = true;
+                car.add(cabin);
+            }
+
+            const loadingEl = document.getElementById('loading');
+            const loader = new THREE.FBXLoader();
+
+            // ÖNEMLİ: GitHub'ın Releases indirme bucket'ı CORS header'ı göndermiyor,
+            // bu yüzden car.fbx repo içine normal dosya olarak commit edilip
+            // raw.githubusercontent.com üzerinden çekiliyor (bu domain CORS destekliyor).
+            // Kendi repo/branch/path bilgine göre aşağıdaki URL'yi güncelle.
+            const CAR_FBX_URL = 'https://raw.githubusercontent.com/Softsprout/onur_tazefidan_portfolio/main/car.fbx';
+            // Texture'lar repo'da ayrı bir klasörde (Textures/) duruyor.
+            // FBX içindeki texture referansları genelde export edilen bilgisayarın
+            // mutlak path'ini içerir, tarayıcı bunu bulamaz. Bu yüzden loader'a
+            // "texture ararken buraya bak" diye ayrı bir kaynak yolu veriyoruz.
+            const TEXTURES_URL = 'https://raw.githubusercontent.com/Softsprout/onur_tazefidan_portfolio/main/Textures/';
+            loader.setResourcePath(TEXTURES_URL);
+
+            loader.load(
+                CAR_FBX_URL,
+                (fbx) => {
+                    // FBX modelleri genelde çok büyük/küçük gelir, ölçeği projene göre ayarla.
+                    fbx.scale.setScalar(0.02); // <-- modelin gerçek boyutuna göre bu değeri değiştir
+                    // --- Texture eşleştirme + düz renk fallback ---
+                    // FBX'te texture referansı yok, sadece 4 gerçek texture'ımız var.
+                    // Materyal isimlerine göre elle eşleştiriyoruz; eşleşmeyenler için
+                    // isme bakarak mantıklı bir düz renk/PBR değeri atıyoruz.
+                    const texLoader = new THREE.TextureLoader();
+                    const TEX_BASE = TEXTURES_URL;
+
+                    const tyreTex = texLoader.load(TEX_BASE + 'Tyre.png');
+                    const brakeTex = texLoader.load(TEX_BASE + 'Car.Brake-Disk.BMP.png');
+                    const plateTex = texLoader.load(TEX_BASE + 'NumernSchildAudiR8.png');
+
+                    // İsme göre düz renk/PBR ayarları (materyal adı -> ayar)
+                    function styleMaterialByName(mat) {
+                        const n = mat.name || '';
+
+                        if (/Tyre/i.test(n)) {
+                            mat.map = tyreTex;
+                            mat.color.set(0xffffff);
+                            mat.roughness = 0.9;
+                            mat.metalness = 0.0;
+                        } else if (/BrakeDisc/i.test(n)) {
+                            mat.map = brakeTex;
+                            mat.color.set(0xffffff);
+                            mat.roughness = 0.5;
+                            mat.metalness = 0.8;
+                        } else if (/NumberPlate/i.test(n) || /Plate/i.test(n)) {
+                            mat.map = plateTex;
+                            mat.color.set(0xffffff);
+                        } else if (/Chrome/i.test(n) && !/Wheel/i.test(n)) {
+                            mat.color.set(0xdedede);
+                            mat.metalness = 1.0;
+                            mat.roughness = 0.15;
+                        } else if (/WheelsChrome|Wheel.*Chrome|Centre|Ring/i.test(n)) {
+                            mat.color.set(0x0a0a0a);
+                            mat.metalness = 0.7;
+                            mat.roughness = 0.35;
+                        } else if (/CarbonFibre|Carbon/i.test(n)) {
+                            mat.color.set(0x1a1a1a);
+                            mat.metalness = 0.3;
+                            mat.roughness = 0.4;
+                        } else if (/BodyMaterials/i.test(n)) {
+                            // Araba rengi: siyah
+                            mat.color.set(0x0d0d0d);
+                            mat.metalness = 0.6;
+                            mat.roughness = 0.25;
+                        } else if (/BlackGlossy/i.test(n)) {
+                            mat.color.set(0x0a0a0a);
+                            mat.metalness = 0.5;
+                            mat.roughness = 0.2;
+                        } else if (/Glass|Windscreen|Mirror/i.test(n)) {
+                            mat.color.set(0x88aabb);
+                            mat.transparent = true;
+                            mat.opacity = 0.35;
+                            mat.metalness = 0.1;
+                            mat.roughness = 0.05;
+                        } else if (/LightSource|FarLight|LightBack/i.test(n)) {
+                            mat.color.set(0xffe08a);
+                            mat.emissive = new THREE.Color(0xffcc55);
+                            mat.emissiveIntensity = 0.6;
+                        } else if (/HoneyComb|Brake\b|AirBackOutput|AirInput|Bolt|undercarriage|Axe|Ring|Centre/i.test(n)) {
+                            mat.color.set(0x1c1c1c);
+                            mat.metalness = 0.4;
+                            mat.roughness = 0.6;
+                        } else if (/RoofCanvas/i.test(n)) {
+                            mat.color.set(0x111111);
+                            mat.roughness = 0.9;
+                        } else if (/AudiLogo/i.test(n)) {
+                            mat.color.set(0xc0c0c0);
+                            mat.metalness = 1.0;
+                            mat.roughness = 0.1;
+                        }
+                        // eşleşmeyenler mevcut FBX rengiyle kalır
+                        mat.needsUpdate = true;
+                    }
+
+                    fbx.traverse((child) => {
+                        if (child.isMesh) {
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+
+                            const mats = Array.isArray(child.material) ? child.material : [child.material];
+                            mats.forEach(styleMaterialByName);
+                        }
+                    });
+
+                    // --- DEBUG: model boyutu ve mesh isimleri ---
+                    const box = new THREE.Box3().setFromObject(fbx);
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    console.log('Model boyutu (scale sonrası):', size);
+                    console.log('Model min/max:', box.min, box.max);
+                    const meshNames = [];
+                    fbx.traverse((c) => { if (c.isMesh) meshNames.push(c.name); });
+                    console.log('Tüm mesh isimleri:', meshNames);
+                    // ----------------------------------------------
+                    // Modelin "ileri" yönü Three.js'in -Z ekseniyle uyuşmayabilir,
+                    // gerekirse burada rotation.y = Math.PI ekleyerek çevir.
+                    car.add(fbx);
+                    loadingEl.classList.add('hidden');
+                },
+                undefined,
+                (err) => {
+                    console.warn('car.fbx yüklenemedi, placeholder araba kullanılıyor:', err);
+                    addPlaceholderCar();
+                    loadingEl.classList.add('hidden');
+                }
+            );
+
+            // Yükleme 5 saniyede tamamlanmazsa da placeholder ile devam et (kilitlenmeyi önle)
+            setTimeout(() => {
+                if (!loadingEl.classList.contains('hidden')) {
+                    if (car.children.length === 0) addPlaceholderCar();
+                    loadingEl.classList.add('hidden');
+                }
+            }, 5000);
+
+            // ------------------------------
+            // Sürüş fiziği (arcade + hafif drift/momentum)
+            // ------------------------------
+            const carState = {
+                speed: 0,          // ileri yön hızı
+                maxSpeed: 32,       // birim/s
+                maxReverse: -10,
+                acceleration: 14,
+                brakeForce: 24,
+                friction: 8,        // gaz bırakınca yavaşlama
+                steerAngle: 0,       // teker açısı (radyan)
+                maxSteer: 0.55,
+                steerSpeed: 2.5,
+                steerReturn: 3.0,
+                heading: 0,          // arabanın baktığı yön (radyan)
+                lateralVelocity: 0,   // hafif drift için yanal kayma
+                driftFactor: 0.10,   // ne kadar drift hissedilecek (0 = yok, yüksek = kayar)
+            };
+
+            const input = { forward: false, backward: false, left: false, right: false };
+
+            // Klavye
+            window.addEventListener('keydown', (e) => {
+                switch (e.key) {
+                    case 'w': case 'ArrowUp': input.forward = true; break;
+                    case 's': case 'ArrowDown': input.backward = true; break;
+                    case 'a': case 'ArrowLeft': input.left = true; break;
+                    case 'd': case 'ArrowRight': input.right = true; break;
+                }
+            });
+            window.addEventListener('keyup', (e) => {
+                switch (e.key) {
+                    case 'w': case 'ArrowUp': input.forward = false; break;
+                    case 's': case 'ArrowDown': input.backward = false; break;
+                    case 'a': case 'ArrowLeft': input.left = false; break;
+                    case 'd': case 'ArrowRight': input.right = false; break;
+                }
+            });
+
+            // Dokunmatik butonlar
+            function bindTouchBtn(id, onDown, onUp) {
+                const el = document.getElementById(id);
+                const start = (e) => { e.preventDefault(); onDown(); el.classList.add('active'); };
+                const end = (e) => { e.preventDefault(); onUp(); el.classList.remove('active'); };
+                el.addEventListener('touchstart', start, { passive: false });
+                el.addEventListener('touchend', end, { passive: false });
+                el.addEventListener('touchcancel', end, { passive: false });
+                // Masaüstünde mouse ile de test edilebilsin
+                el.addEventListener('mousedown', start);
+                el.addEventListener('mouseup', end);
+                el.addEventListener('mouseleave', end);
+            }
+            bindTouchBtn('btnGas', () => input.forward = true, () => input.forward = false);
+            bindTouchBtn('btnBrake', () => input.backward = true, () => input.backward = false);
+            bindTouchBtn('btnLeft', () => input.left = true, () => input.left = false);
+            bindTouchBtn('btnRight', () => input.right = true, () => input.right = false);
+
+            // ------------------------------
+            // Kamera: yukarıdan hafif arkadan takip
+            // ------------------------------
+            const camOffset = new THREE.Vector3(0, 12, -18); // araba lokal uzayında: yukarı + geride (geçici, debug sonrası ayarlanacak)
+            const camLookOffset = new THREE.Vector3(0, 1.5, 4); // biraz ileriye bak
+            const camPos = new THREE.Vector3();
+            const camLook = new THREE.Vector3();
+
+            function updateCamera(dt) {
+                const rotatedOffset = camOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+                const targetCamPos = car.position.clone().add(rotatedOffset);
+                camPos.lerp(targetCamPos, Math.min(1, dt * 4));
+
+                const rotatedLook = camLookOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+                const targetLook = car.position.clone().add(rotatedLook);
+                camLook.lerp(targetLook, Math.min(1, dt * 6));
+
+                camera.position.copy(camPos);
+                camera.lookAt(camLook);
+            }
+
+            // ------------------------------
+            // Fizik güncelleme
+            // ------------------------------
+            const speedValEl = document.getElementById('speedVal');
+
+            function updateCar(dt) {
+                // Gaz / fren-geri
+                if (input.forward) {
+                    carState.speed += carState.acceleration * dt;
+                } else if (input.backward) {
+                    carState.speed -= carState.brakeForce * dt;
+                } else {
+                    // sürtünme ile doğal yavaşlama
+                    if (carState.speed > 0) {
+                        carState.speed = Math.max(0, carState.speed - carState.friction * dt);
+                    } else if (carState.speed < 0) {
+                        carState.speed = Math.min(0, carState.speed + carState.friction * dt);
+                    }
+                }
+                carState.speed = THREE.MathUtils.clamp(carState.speed, carState.maxReverse, carState.maxSpeed);
+
+                // Direksiyon (teker açısı yumuşak geçiş)
+                let steerInput = 0;
+                if (input.left) steerInput += 1;
+                if (input.right) steerInput -= 1;
+
+                if (steerInput !== 0) {
+                    carState.steerAngle += steerInput * carState.steerSpeed * dt;
+                    carState.steerAngle = THREE.MathUtils.clamp(carState.steerAngle, -carState.maxSteer, carState.maxSteer);
+                } else {
+                    // merkeze dönüş
+                    if (carState.steerAngle > 0) {
+                        carState.steerAngle = Math.max(0, carState.steerAngle - carState.steerReturn * dt);
+                    } else if (carState.steerAngle < 0) {
+                        carState.steerAngle = Math.min(0, carState.steerAngle + carState.steerReturn * dt);
+                    }
+                }
+
+                // Sadece hareket halindeyken dönüş uygula (duruyorken araba dönmesin)
+                const speedFactor = THREE.MathUtils.clamp(Math.abs(carState.speed) / carState.maxSpeed, 0, 1);
+                const turnAmount = carState.steerAngle * speedFactor * dt * 2.2;
+
+                // Geri giderken direksiyon yönü ters olur
+                const dir = carState.speed >= 0 ? 1 : -1;
+                carState.heading += turnAmount * dir;
+
+                // Hafif drift: yanal kaymayı direksiyon açısına ve hıza göre hesapla, sonra sönümle
+                const targetLateral = carState.steerAngle * speedFactor * carState.driftFactor * carState.speed;
+                carState.lateralVelocity = THREE.MathUtils.lerp(carState.lateralVelocity, targetLateral, dt * 3);
+
+                // Pozisyonu güncelle: ileri yön + yanal kayma
+                const forwardVec = new THREE.Vector3(Math.sin(carState.heading), 0, Math.cos(carState.heading));
+                const rightVec = new THREE.Vector3(Math.cos(carState.heading), 0, -Math.sin(carState.heading));
+
+                car.position.addScaledVector(forwardVec, carState.speed * dt);
+                car.position.addScaledVector(rightVec, carState.lateralVelocity * dt);
+
+                car.rotation.y = carState.heading;
+
+                // HUD güncelle
+                speedValEl.textContent = Math.round(Math.abs(carState.speed) * 3.6); // kabaca km/h hissi
+            }
+
+            // ------------------------------
+            // Reset / yeniden başlat
+            // ------------------------------
+            document.getElementById('restartBtn').addEventListener('click', () => {
+                car.position.set(0, 0, 0);
+                carState.speed = 0;
+                carState.steerAngle = 0;
+                carState.heading = 0;
+                carState.lateralVelocity = 0;
+            });
+
+            // ------------------------------
+            // Resize
+            // ------------------------------
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // ------------------------------
+            // Ana döngü
+            // ------------------------------
+            const clock = new THREE.Clock();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                const dt = Math.min(clock.getDelta(), 0.05); // büyük sıçramaları engelle
+
+                updateCar(dt);
+                updateCamera(dt);
+
+                renderer.render(scene, camera);
+            }
+            animate();
+
+        })();
+    </script>
+
+</body>
+
+</html>
