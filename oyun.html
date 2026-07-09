@@ -97,19 +97,7 @@
             background: rgba(255, 255, 255, 0.4);
         }
 
-        #restartBtn {
-            position: fixed;
-            top: 12px;
-            right: 12px;
-            z-index: 20;
-            background: #2b7de9;
-            color: #fff;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-        }
+
 
         @media (max-width: 480px) {
             #hud {
@@ -123,10 +111,7 @@
                 font-size: 20px;
             }
 
-            #restartBtn {
-                padding: 8px 12px;
-                font-size: 12px;
-            }
+
         }
     </style>
 </head>
@@ -140,7 +125,7 @@
         Kontroller: W/↑ gaz, S/↓ fren-geri, A/D veya ←/→ dön
     </div>
 
-    <button id="restartBtn">Yeniden Başlat</button>
+
 
     <div id="controls">
         <div class="ctrl-group">
@@ -163,14 +148,16 @@
             'use strict';
 
             // ------------------------------
-            // Temel sahne kurulumu — GECE / YAĞMUR / ŞİMŞEK
+            // Temel sahne kurulumu — NFS MW Sepia/Gündüz
             // ------------------------------
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050510);
-            scene.fog = new THREE.FogExp2(0x050510, 0.012);
+            // NFS MW karakteristik sepia/kirli gri gökyüzü rengi (daha koyu ki patlamasın)
+            const skyColor = new THREE.Color(0x403d35);
+            scene.background = skyColor;
+            scene.fog = new THREE.FogExp2(skyColor, 0.0055);
 
             const camera = new THREE.PerspectiveCamera(
-                60, window.innerWidth / window.innerHeight, 0.1, 1000
+                75, window.innerWidth / window.innerHeight, 0.1, 1000
             );
 
             const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -179,15 +166,15 @@
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.4;
+            renderer.toneMappingExposure = 1.0;
             document.body.appendChild(renderer.domElement);
 
-            // ---- Gece ışıklandırma (arabayı rahat görecek kadar) ----
-            const hemi = new THREE.HemisphereLight(0x2a2a50, 0x0a0a15, 0.9);
+            // ---- Kapalı hava ışıklandırma (NFS MW tarzı sarımtırak/yeşilimsi) ----
+            const hemi = new THREE.HemisphereLight(0x7a7970, 0x333330, 0.8);
             scene.add(hemi);
 
-            // Ay ışığı — sahneyi sürekli aydınlatan güçlü sabit ışık
-            const moonLight = new THREE.DirectionalLight(0x7799bb, 0.8);
+            // Güneş ışığı (bulutlar arasından sızan soluk sarımtırak ışık)
+            const moonLight = new THREE.DirectionalLight(0xa5a290, 1.0);
             moonLight.position.set(30, 60, -20);
             moonLight.castShadow = true;
             moonLight.shadow.mapSize.set(2048, 2048);
@@ -216,8 +203,8 @@
             const headL = createHeadlight(-0.65);
             const headR = createHeadlight(0.65);
 
-            // Araba üzerinde sabit PointLight (arabayı yukarıdan hafif aydınlatır)
-            const carTopLight = new THREE.PointLight(0x8899cc, 0.7, 25, 2);
+            // Araba üzerinde sabit PointLight (soluk ışık)
+            const carTopLight = new THREE.PointLight(0x888880, 0.4, 25, 2);
             carTopLight.position.set(0, 6, 0);
             scene.add(carTopLight);
 
@@ -244,158 +231,271 @@
                 carTopLight.position.copy(car.position).add(new THREE.Vector3(0, 5, 0));
             }
 
-            // ---- Gökyüzü kubbesi (yıldızlar) ----
-            (function createStarfield() {
-                const starCount = 1200;
-                const geo = new THREE.BufferGeometry();
-                const verts = new Float32Array(starCount * 3);
-                for (let i = 0; i < starCount; i++) {
-                    // yarı-küre üst kısım
-                    const theta = Math.random() * Math.PI * 2;
-                    const phi = Math.random() * Math.PI * 0.45; // ufka yakın = 0, tepe = 0.5π
-                    const r = 300 + Math.random() * 100;
-                    verts[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-                    verts[i * 3 + 1] = r * Math.cos(phi);
-                    verts[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-                }
-                geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-                const mat = new THREE.PointsMaterial({
-                    color: 0xaaaacc,
-                    size: 0.7,
-                    transparent: true,
-                    opacity: 0.5,
-                    fog: false
-                });
-                scene.add(new THREE.Points(geo, mat));
-            })();
 
-            // ---- Bulut katmanı (yarı saydam düzlem) ----
-            (function createClouds() {
-                // Canvas ile bulut dokusu oluştur
+            // ---- Kapalı hava bulut katmanı (NFS MW Overcast) ----
+            (function createOvercastClouds() {
                 const cv = document.createElement('canvas');
-                cv.width = 512; cv.height = 512;
+                cv.width = 1024; cv.height = 1024;
                 const cx = cv.getContext('2d');
-                cx.fillStyle = 'rgba(0,0,0,0)';
-                cx.fillRect(0, 0, 512, 512);
-                for (let i = 0; i < 90; i++) {
-                    const x = Math.random() * 512;
-                    const y = Math.random() * 512;
-                    const r = 30 + Math.random() * 80;
+
+                // Zemin rengi
+                cx.fillStyle = 'rgba(90, 88, 80, 0.4)';
+                cx.fillRect(0, 0, 1024, 1024);
+
+                // Bulut kümeleri (kirli gri/kahve tonlar) - Çok daha yoğun!
+                for (let i = 0; i < 2500; i++) {
+                    const x = Math.random() * 1024;
+                    const y = Math.random() * 1024;
+                    const r = 60 + Math.random() * 180; // Bulutlar biraz daha büyük
+
                     const grad = cx.createRadialGradient(x, y, 0, x, y, r);
-                    grad.addColorStop(0, 'rgba(20,20,35,0.5)');
-                    grad.addColorStop(1, 'rgba(10,10,20,0)');
+                    // Yoğun koyu kısımlar
+                    const colorVal = 50 + Math.random() * 50;
+                    grad.addColorStop(0, `rgba(${colorVal}, ${colorVal - 5}, ${colorVal - 10}, 0.95)`); // Daha koyu ve opak
+                    grad.addColorStop(1, 'rgba(100, 100, 95, 0)');
+
                     cx.fillStyle = grad;
                     cx.fillRect(x - r, y - r, r * 2, r * 2);
                 }
+
                 const tex = new THREE.CanvasTexture(cv);
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-                tex.repeat.set(3, 3);
-                const cloudGeo = new THREE.PlaneGeometry(600, 600);
+                tex.repeat.set(4, 4);
+
+                const cloudGeo = new THREE.PlaneGeometry(1200, 1200);
                 const cloudMat = new THREE.MeshBasicMaterial({
-                    map: tex, transparent: true, opacity: 0.7,
-                    depthWrite: false, side: THREE.DoubleSide, fog: false
+                    map: tex, transparent: true, opacity: 0.9,
+                    depthWrite: false, side: THREE.DoubleSide, fog: true
                 });
+
                 const clouds = new THREE.Mesh(cloudGeo, cloudMat);
                 clouds.rotation.x = -Math.PI / 2;
-                clouds.position.y = 80;
+                clouds.position.y = 90;
                 scene.add(clouds);
             })();
+            // ============================
+            // SINIRSIZ DÜNYA — NFS MW TARZI
+            // ============================
+            // ============================
+            const CHUNK_LEN = 60;
+            const NUM_CHUNKS = 14;
+            const ROAD_W = 28; // geniş 4-şeritli yol
+            const SIDEWALK_W = 4;
 
-            // ---- Zemin (koyu ıslak çimen) ----
-            const groundGeo = new THREE.PlaneGeometry(500, 500);
+            // ---- Zemin (kirli beton/toprak rengi) ----
+            const groundGeo = new THREE.PlaneGeometry(600, 600);
             const groundMat = new THREE.MeshStandardMaterial({
-                color: 0x0c1a0c, roughness: 0.6, metalness: 0.15
+                color: 0x4a4944, roughness: 0.9, metalness: 0.05
             });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // ---- Islak yol (koyu asfalt + yansıma hissi) ----
-            const roadMat = new THREE.MeshStandardMaterial({
-                color: 0x111118, roughness: 0.25, metalness: 0.35
+            // ---- Materyaller (paylaşılan) ----
+            // Yol: kirli, aşınmış gri beton/asfalt rengi
+            const roadChunkMat = new THREE.MeshStandardMaterial({
+                color: 0x5a5b5c, roughness: 0.7, metalness: 0.1
             });
-            const road = new THREE.Mesh(new THREE.PlaneGeometry(20, 500), roadMat);
-            road.rotation.x = -Math.PI / 2;
-            road.position.y = 0.01;
-            road.receiveShadow = true;
-            scene.add(road);
+            const yellowMarkMat = new THREE.MeshStandardMaterial({
+                color: 0xb59a22, roughness: 0.8, metalness: 0.0,
+                polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+            });
+            const whiteMarkMat = new THREE.MeshStandardMaterial({
+                color: 0x888888, roughness: 0.8, metalness: 0.0,
+                polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+            });
+            // Kaldırım: daha açık ama kirli beton
+            const sidewalkMat = new THREE.MeshStandardMaterial({
+                color: 0x6e6d68, roughness: 0.9, metalness: 0.0
+            });
+            // Bariyerler: beton grisi
+            const barrierMat = new THREE.MeshStandardMaterial({
+                color: 0x555555, roughness: 0.9, metalness: 0.0
+            });
 
-            // Yol kenar çizgileri
-            const stripeMat = new THREE.MeshStandardMaterial({
-                color: 0x888888, roughness: 0.4, metalness: 0.1
-            });
-            const stripeGroup = new THREE.Group();
-            for (let i = -240; i < 240; i += 10) {
-                const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 4), stripeMat);
-                stripe.position.set(0, 0.02, i);
-                stripeGroup.add(stripe);
+            // Bina materyalleri (Endüstriyel kirli tonlar, tuğla ve beton)
+            const buildingColors = [
+                0x3b3a37, 0x45433e, 0x2d2d2b, 0x3a3530,
+                0x42403c, 0x363738, 0x2e2925, 0x4a4540
+            ];
+            // Konteyner renkleri (Soluk ve paslı NFS MW tonları)
+            const containerColors = [0x7a3028, 0x2a4559, 0x8a5528, 0x3a553a, 0x5a4a3a];
+
+            // ---- Chunk oluşturma ----
+            function createRoadChunk(zPos) {
+                const chunk = new THREE.Group();
+                chunk.userData.baseZ = zPos;
+
+                // Yol yüzeyi
+                const roadMesh = new THREE.Mesh(
+                    new THREE.PlaneGeometry(ROAD_W, CHUNK_LEN), roadChunkMat
+                );
+                roadMesh.rotation.x = -Math.PI / 2;
+                roadMesh.position.y = 0.01;
+                roadMesh.receiveShadow = true;
+                chunk.add(roadMesh);
+
+                // Kaldırımlar (yolun iki yanı)
+                [-1, 1].forEach(side => {
+                    const sw = new THREE.Mesh(
+                        new THREE.BoxGeometry(SIDEWALK_W, 0.15, CHUNK_LEN), sidewalkMat
+                    );
+                    sw.position.set(side * (ROAD_W / 2 + SIDEWALK_W / 2), 0.075, 0);
+                    sw.receiveShadow = true;
+                    chunk.add(sw);
+                });
+
+                // Beton bariyerler (yol kenarı)
+                [-1, 1].forEach(side => {
+                    const barrier = new THREE.Mesh(
+                        new THREE.BoxGeometry(0.4, 0.8, CHUNK_LEN), barrierMat
+                    );
+                    barrier.position.set(side * (ROAD_W / 2 - 0.3), 0.4, 0);
+                    barrier.castShadow = true;
+                    barrier.receiveShadow = true;
+                    chunk.add(barrier);
+                });
+
+                // Sarı orta çizgi (çift çizgi — NFS MW tarzı)
+                for (let z = -CHUNK_LEN / 2 + 2; z < CHUNK_LEN / 2; z += 8) {
+                    const mark = new THREE.Mesh(
+                        new THREE.PlaneGeometry(0.3, 5), yellowMarkMat
+                    );
+                    mark.rotation.x = -Math.PI / 2;
+                    mark.position.set(-0.35, 0.015, z);
+                    chunk.add(mark);
+                    const mark2 = mark.clone();
+                    mark2.position.x = 0.35;
+                    chunk.add(mark2);
+                }
+
+                // Şerit çizgileri (beyaz kesikli — her şerit arası)
+                [-7, 7].forEach(laneX => {
+                    for (let z = -CHUNK_LEN / 2 + 2; z < CHUNK_LEN / 2; z += 12) {
+                        const mark = new THREE.Mesh(
+                            new THREE.PlaneGeometry(0.2, 4), whiteMarkMat
+                        );
+                        mark.rotation.x = -Math.PI / 2;
+                        mark.position.set(laneX, 0.015, z);
+                        chunk.add(mark);
+                    }
+                });
+
+                // Kenar çizgileri (solid beyaz)
+                [-ROAD_W / 2 + 0.5, ROAD_W / 2 - 0.5].forEach(edgeX => {
+                    const edge = new THREE.Mesh(
+                        new THREE.PlaneGeometry(0.25, CHUNK_LEN), whiteMarkMat
+                    );
+                    edge.rotation.x = -Math.PI / 2;
+                    edge.position.set(edgeX, 0.015, 0);
+                    chunk.add(edge);
+                });
+
+                // ---- Binalar (endüstriyel — NFS MW) ----
+                [-1, 1].forEach(side => {
+                    const baseX = side * (ROAD_W / 2 + SIDEWALK_W + 2);
+                    const numBuildings = 2 + Math.floor(Math.random() * 3);
+                    let zCursor = -CHUNK_LEN / 2 + 3;
+
+                    for (let b = 0; b < numBuildings && zCursor < CHUNK_LEN / 2 - 5; b++) {
+                        const bType = Math.random();
+
+                        if (bType < 0.4) {
+                            // Büyük depo/fabrika binası
+                            const w = 8 + Math.random() * 12;
+                            const h = 6 + Math.random() * 14;
+                            const d = 10 + Math.random() * 15;
+                            const col = buildingColors[Math.floor(Math.random() * buildingColors.length)];
+                            const bMat = new THREE.MeshStandardMaterial({
+                                color: col, roughness: 0.85, metalness: 0.1
+                            });
+                            const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bMat);
+                            bMesh.position.set(baseX + side * w / 2, h / 2, zCursor + d / 2);
+                            bMesh.castShadow = true;
+                            bMesh.receiveShadow = true;
+                            chunk.add(bMesh);
+                            zCursor += d + 2 + Math.random() * 4;
+
+                        } else if (bType < 0.7) {
+                            // Konteyner yığını
+                            const numContainers = 1 + Math.floor(Math.random() * 3);
+                            for (let c = 0; c < numContainers; c++) {
+                                const cCol = containerColors[Math.floor(Math.random() * containerColors.length)];
+                                const cMat = new THREE.MeshStandardMaterial({
+                                    color: cCol, roughness: 0.7, metalness: 0.15
+                                });
+                                const cMesh = new THREE.Mesh(
+                                    new THREE.BoxGeometry(2.5, 2.5, 6), cMat
+                                );
+                                const stackY = c * 2.5 + 1.25;
+                                cMesh.position.set(
+                                    baseX + side * (2 + Math.random() * 3),
+                                    stackY,
+                                    zCursor + 3
+                                );
+                                cMesh.castShadow = true;
+                                cMesh.receiveShadow = true;
+                                chunk.add(cMesh);
+                            }
+                            zCursor += 8 + Math.random() * 4;
+
+                        } else {
+                            // İnce yüksek kule/baca
+                            const tw = 1.5 + Math.random() * 2;
+                            const th = 15 + Math.random() * 25;
+                            const tMat = new THREE.MeshStandardMaterial({
+                                color: 0x1a1a1a, roughness: 0.9, metalness: 0.05
+                            });
+                            const tMesh = new THREE.Mesh(
+                                new THREE.BoxGeometry(tw, th, tw), tMat
+                            );
+                            tMesh.position.set(baseX + side * 4, th / 2, zCursor + tw);
+                            tMesh.castShadow = true;
+                            tMesh.receiveShadow = true;
+                            chunk.add(tMesh);
+                            zCursor += tw + 8 + Math.random() * 6;
+                        }
+                    }
+                });
+
+                chunk.position.z = zPos;
+                scene.add(chunk);
+                return chunk;
             }
-            scene.add(stripeGroup);
 
-            // Yol kenarı engeller (daha koyu tonlar — gece)
-            const obstacleMat = new THREE.MeshStandardMaterial({
-                color: 0x1a1008, roughness: 0.85, metalness: 0.0
-            });
-            for (let i = -240; i < 240; i += 20) {
-                [-14, 14].forEach((xSide) => {
-                    const box = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), obstacleMat);
-                    box.position.set(xSide + (Math.random() * 2 - 1), 1.5, i + (Math.random() * 4 - 2));
-                    box.castShadow = true;
-                    box.receiveShadow = true;
-                    scene.add(box);
+            // Chunk havuzu oluştur
+            const chunks = [];
+            for (let i = 0; i < NUM_CHUNKS; i++) {
+                chunks.push(createRoadChunk((i - 3) * CHUNK_LEN));
+            }
+
+            // ---- Sınırsız dünya güncelleme ----
+            function updateInfiniteWorld() {
+                const carZ = car.position.z;
+
+                // Zemin arabayı takip etsin
+                ground.position.x = car.position.x;
+                ground.position.z = carZ;
+
+                // Chunk geri dönüşümü
+                chunks.sort((a, b) => a.position.z - b.position.z);
+                const frontZ = chunks[chunks.length - 1].position.z;
+                const backLimit = carZ - CHUNK_LEN * 3;
+
+                chunks.forEach(chunk => {
+                    if (chunk.position.z + CHUNK_LEN / 2 < backLimit) {
+                        // Bu chunk'ı kaldır ve yenisini en öne koy
+                        scene.remove(chunk);
+                        const idx = chunks.indexOf(chunk);
+                        const newZ = frontZ + CHUNK_LEN;
+                        const newChunk = createRoadChunk(newZ);
+                        chunks[idx] = newChunk;
+                    }
                 });
             }
 
-            // ============================
-            // YAĞMUR SİSTEMİ
-            // ============================
-            const RAIN_COUNT = 6000;
-            const rainGeo = new THREE.BufferGeometry();
-            const rainPositions = new Float32Array(RAIN_COUNT * 3);
-            const rainVelocities = new Float32Array(RAIN_COUNT); // her damlanın düşüş hızı
 
-            function initRainDrop(i) {
-                rainPositions[i * 3]     = (Math.random() - 0.5) * 200;  // x
-                rainPositions[i * 3 + 1] = Math.random() * 60 + 5;      // y (yukarıda)
-                rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 200; // z
-                rainVelocities[i] = 30 + Math.random() * 30;            // düşüş hızı
-            }
-            for (let i = 0; i < RAIN_COUNT; i++) initRainDrop(i);
-
-            rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
-
-            // Yağmur çizgi materyali (ince beyaz çizgiler)
-            const rainMat = new THREE.PointsMaterial({
-                color: 0x8899bb,
-                size: 0.08,
-                transparent: true,
-                opacity: 0.5,
-                depthWrite: false,
-                fog: true
-            });
-            const rain = new THREE.Points(rainGeo, rainMat);
-            scene.add(rain);
-
-            function updateRain(dt) {
-                const pos = rainGeo.attributes.position.array;
-                for (let i = 0; i < RAIN_COUNT; i++) {
-                    pos[i * 3 + 1] -= rainVelocities[i] * dt;
-                    // hafif rüzgar etkisi
-                    pos[i * 3]     += 2.0 * dt;
-                    pos[i * 3 + 2] += 1.5 * dt;
-                    // yere düştüyse yeniden spawn
-                    if (pos[i * 3 + 1] < 0) {
-                        // arabanın etrafında yeniden oluştur
-                        pos[i * 3]     = car.position.x + (Math.random() - 0.5) * 200;
-                        pos[i * 3 + 1] = 40 + Math.random() * 25;
-                        pos[i * 3 + 2] = car.position.z + (Math.random() - 0.5) * 200;
-                    }
-                }
-                rainGeo.attributes.position.needsUpdate = true;
-                // Yağmuru kameranın etrafında tut
-                rain.position.set(0, 0, 0);
-            }
 
             // ============================
             // ŞİMŞEK SİSTEMİ (2-6 saniyede bir)
@@ -603,27 +703,8 @@
                         }
                     });
 
-                    // Bounding box hesapla (alt panel için)
-                    const box = new THREE.Box3().setFromObject(fbx);
-                    const size = new THREE.Vector3();
-                    box.getSize(size);
-
                     // Modelin "ileri" yönü Three.js'in -Z ekseniyle uyuşmayabilir,
                     // gerekirse burada rotation.y = Math.PI ekleyerek çevir.
-
-                    // --- Alt panel: modelin altındaki boşluğu kapat ---
-                    const underGeo = new THREE.BoxGeometry(
-                        Math.max(size.x + 1, 4),
-                        0.1,
-                        Math.max(size.z + 1, 7)
-                    );
-                    const underMat = new THREE.MeshStandardMaterial({
-                        color: 0x000000, roughness: 1.0, metalness: 0.0
-                    });
-                    const underPanel = new THREE.Mesh(underGeo, underMat);
-                    underPanel.position.set(0, 0.05, 0);
-                    underPanel.receiveShadow = true;
-                    car.add(underPanel);
 
                     car.add(fbx);
                     loadingEl.classList.add('hidden');
@@ -702,21 +783,42 @@
             bindTouchBtn('btnRight', () => input.right = true, () => input.right = false);
 
             // ------------------------------
-            // Kamera: yukarıdan hafif arkadan takip
+            // Kamera: NFS MW tarzı alçak takip (chase cam)
             // ------------------------------
-            const camOffset = new THREE.Vector3(0, 12, -18); // araba lokal uzayında: yukarı + geride (geçici, debug sonrası ayarlanacak)
-            const camLookOffset = new THREE.Vector3(0, 1.5, 4); // biraz ileriye bak
+            const introCamOffset = new THREE.Vector3(0, 2.5, -10); // Başlangıç pozisyonu
+            const gameplayCamOffset = new THREE.Vector3(0, 5.5, -14); // Kalıcı oyun pozisyonu (daha yüksek)
+
+            const camLookOffset = new THREE.Vector3(0, 1.8, 15);
             const camPos = new THREE.Vector3();
             const camLook = new THREE.Vector3();
 
             function updateCamera(dt) {
-                const rotatedOffset = camOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
-                const targetCamPos = car.position.clone().add(rotatedOffset);
-                camPos.lerp(targetCamPos, Math.min(1, dt * 4));
+                // Intro efekti (oyun başından geçen süre)
+                const elapsed = clock ? clock.getElapsedTime() : 0;
 
+                let currentOffset;
+                if (elapsed < 1.0) {
+                    // İlk 1 saniye başlangıç noktasında bekle
+                    currentOffset = introCamOffset.clone();
+                } else {
+                    // 1. saniyeden sonra, 2 saniye içinde yavaşça gameplay pozisyonuna geç (smooth transition)
+                    const transitionProgress = Math.min((elapsed - 1.0) / 2.0, 1.0);
+                    // Daha yumuşak bir eğri (ease-in-out)
+                    const smoothStep = transitionProgress * transitionProgress * (3 - 2 * transitionProgress);
+                    currentOffset = introCamOffset.clone().lerp(gameplayCamOffset, smoothStep);
+                }
+
+                const rotatedOffset = currentOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
+                const targetCamPos = car.position.clone().add(rotatedOffset);
+
+                // Kamera her zaman arabanın hareketini yumuşak takip etsin
+                camPos.lerp(targetCamPos, Math.min(1, dt * 6));
+
+                // Bakış noktası
                 const rotatedLook = camLookOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), carState.heading);
                 const targetLook = car.position.clone().add(rotatedLook);
-                camLook.lerp(targetLook, Math.min(1, dt * 6));
+
+                camLook.lerp(targetLook, Math.min(1, dt * 8));
 
                 camera.position.copy(camPos);
                 camera.lookAt(camLook);
@@ -785,16 +887,7 @@
                 speedValEl.textContent = Math.round(Math.abs(carState.speed) * 3.6); // kabaca km/h hissi
             }
 
-            // ------------------------------
-            // Reset / yeniden başlat
-            // ------------------------------
-            document.getElementById('restartBtn').addEventListener('click', () => {
-                car.position.set(0, 0, 0);
-                carState.speed = 0;
-                carState.steerAngle = 0;
-                carState.heading = 0;
-                carState.lateralVelocity = 0;
-            });
+
 
             // ------------------------------
             // Resize
@@ -817,12 +910,14 @@
                 updateCar(dt);
                 updateCamera(dt);
 
-                // Hava efektleri
-                updateRain(dt);
+                // Hava efektleri (Şimşek)
                 updateLightning(dt);
 
-                // Far ışıklarını güncelle (araba yönünü takip etsin)
+                // Far ışıklarını güncelle
                 updateHeadlights();
+
+                // Sınırsız dünya güncelle
+                updateInfiniteWorld();
 
                 renderer.render(scene, camera);
             }
